@@ -1,0 +1,96 @@
+name: Update scrcpy
+
+# Weekly: if Genymobile/scrcpy has a newer release, bump SCRCPY_VERSION, build
+# and test it, then either
+#  - open a pull request (default), or
+#  - commit straight to main and publish, if the repository variable
+#    AUTO_UPDATE is set to "true".
+# If the new release does not build or pass the tests, an issue is opened.
+
+on:
+  schedule:
+    - cron: "41 4 * * 2"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  actions: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check for a new scrcpy release
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          current="$(sed -n 's/^ARG SCRCPY_VERSION=//p' Dockerfile)"
+          latest="$(gh api repos/Genymobile/scrcpy/releases/latest --jq .tag_name)"
+          latest="${latest#v}"
+          echo "current=$current latest=$latest"
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+          newest="$(printf '%s\n%s\n' "$current" "$latest" | sort -V | tail -n1)"
+          if [ "$latest" != "$current" ] && [ "$newest" = "$latest" ]; then
+            echo "update=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.check.outputs.update == 'true'
+        run: scripts/bump-scrcpy.sh "${{ steps.check.outputs.latest }}"
+
+      - if: steps.check.outputs.update == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - if: steps.check.outputs.update == 'true'
+        name: Build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: scrcpy-web:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - if: steps.check.outputs.update == 'true'
+        name: Test
+        run: |
+          tests/run-unit-tests.sh scrcpy-web:test
+          tests/smoke.sh scrcpy-web:test
+
+      - if: steps.check.outputs.update == 'true' && vars.AUTO_UPDATE == 'true'
+        name: Commit to main and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "Update scrcpy to ${{ steps.check.outputs.latest }}"
+          git push
+          gh workflow run publish.yml --ref main
+
+      - if: steps.check.outputs.update == 'true' && vars.AUTO_UPDATE != 'true'
+        name: Open pull request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: update/scrcpy-${{ steps.check.outputs.latest }}
+          commit-message: Update scrcpy to ${{ steps.check.outputs.latest }}
+          title: Update scrcpy to ${{ steps.check.outputs.latest }}
+          body: |
+            scrcpy [${{ steps.check.outputs.latest }}](https://github.com/Genymobile/scrcpy/releases/tag/v${{ steps.check.outputs.latest }}) is out (currently ${{ steps.check.outputs.current }}).
+
+            The image built and passed the unit and smoke tests in this workflow. Merge to publish.
+
+      - if: failure() && steps.check.outputs.update == 'true'
+        name: Report a failed update
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="scrcpy ${{ steps.check.outputs.latest }} does not build or pass tests"
+          if ! gh issue list --state open --search "$title in:title" --json number --jq '.[0].number' | grep -q .; then
+            gh issue create --title "$title" --body "The weekly update check could not move to scrcpy ${{ steps.check.outputs.latest }}. See ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }} for the log. The published image stays on ${{ steps.check.outputs.current }} until this is fixed."
+          fi

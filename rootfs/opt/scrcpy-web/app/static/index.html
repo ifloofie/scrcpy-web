@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<meta name="theme-color" content="#0e1014">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="scrcpy-web">
+<title>scrcpy-web</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/static/icon-180.png">
+<link rel="manifest" href="/static/manifest.webmanifest">
+<link rel="stylesheet" href="/static/app.css">
+<script type="module" src="/static/app.js"></script>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-back" viewBox="0 0 24 24"><path d="M16 5 7 12l9 7z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></symbol>
+  <symbol id="i-home" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7" fill="none" stroke="currentColor" stroke-width="2"/></symbol>
+  <symbol id="i-recents" viewBox="0 0 24 24"><rect x="5.5" y="5.5" width="13" height="13" rx="2.5" fill="none" stroke="currentColor" stroke-width="2"/></symbol>
+  <symbol id="i-wake" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></g></symbol>
+  <symbol id="i-unlock" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7.5a4 4 0 0 1 7.7-1.5"/></g></symbol>
+  <symbol id="i-power" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v8"/><path d="M6.3 7.2a7.5 7.5 0 1 0 11.4 0"/></g></symbol>
+  <symbol id="i-voldown" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M4 9.5h3.5L12 6v12l-4.5-3.5H4z"/><path d="M15.5 12h5"/></g></symbol>
+  <symbol id="i-volup" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M4 9.5h3.5L12 6v12l-4.5-3.5H4z"/><path d="M15.5 12h5M18 9.5v5"/></g></symbol>
+  <symbol id="i-keyboard" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M8 14.5h8"/></g></symbol>
+  <symbol id="i-camera" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M4 8h3l1.5-2h7L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.2"/></g></symbol>
+  <symbol id="i-expand" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></g></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><g fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></g></symbol>
+</svg>
+
+<div class="app">
+  <header class="topbar">
+    <div class="device">
+      <span class="dot" id="status-dot" aria-hidden="true"></span>
+      <div class="device-text">
+        <strong id="device-name">scrcpy-web</strong>
+        <span id="device-detail" class="muted">Connecting…</span>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="icon" data-action="type" title="Type or paste text" aria-label="Type or paste text"><svg><use href="#i-keyboard"/></svg></button>
+      <button class="icon" data-action="notifications" title="Notifications" aria-label="Open notifications"><svg><use href="#i-bell"/></svg></button>
+      <a class="icon button" id="screenshot" href="/api/screenshot?download=1" title="Screenshot" aria-label="Download screenshot"><svg><use href="#i-camera"/></svg></a>
+      <button class="icon" data-action="fullscreen" id="fullscreen-btn" title="Fullscreen" aria-label="Fullscreen"><svg><use href="#i-expand"/></svg></button>
+      <button class="icon" data-action="menu" title="More" aria-label="More options"><svg><use href="#i-more"/></svg></button>
+    </div>
+  </header>
+
+  <main class="stage">
+    <div id="screen" class="screen" aria-label="Phone screen"></div>
+    <div id="overlay" class="overlay" hidden>
+      <div class="overlay-card">
+        <div class="spinner" id="overlay-spinner"></div>
+        <h2 id="overlay-title">Connecting…</h2>
+        <p id="overlay-text" class="muted"></p>
+      </div>
+    </div>
+  </main>
+
+  <nav class="controls" aria-label="Phone controls">
+    <div class="group">
+      <button data-key="back" title="Back" aria-label="Back"><svg><use href="#i-back"/></svg></button>
+      <button data-key="home" title="Home" aria-label="Home"><svg><use href="#i-home"/></svg></button>
+      <button data-key="recents" title="Recent apps" aria-label="Recent apps"><svg><use href="#i-recents"/></svg></button>
+    </div>
+    <div class="group">
+      <button data-action="wake" title="Wake screen" aria-label="Wake screen"><svg><use href="#i-wake"/></svg></button>
+      <button data-action="unlock" title="Unlock" aria-label="Unlock"><svg><use href="#i-unlock"/></svg></button>
+      <button data-key="power" title="Power button" aria-label="Power button"><svg><use href="#i-power"/></svg></button>
+    </div>
+    <div class="group">
+      <button data-key="volume_down" title="Volume down" aria-label="Volume down"><svg><use href="#i-voldown"/></svg></button>
+      <button data-key="volume_up" title="Volume up" aria-label="Volume up"><svg><use href="#i-volup"/></svg></button>
+    </div>
+  </nav>
+</div>
+
+<dialog id="type-dialog" class="sheet">
+  <form method="dialog">
+    <h3>Send text to the phone</h3>
+    <p class="muted small">Tap a text field on the phone first.</p>
+    <textarea id="type-text" rows="4" placeholder="Text to send" autocomplete="off" autocapitalize="off" spellcheck="false"></textarea>
+    <div class="row">
+      <button type="button" data-send="paste" class="primary" title="Works with any text, including emoji">Paste</button>
+      <button type="button" data-send="type" title="Types key by key through ADB (plain ASCII only)">Type</button>
+    </div>
+    <div class="row keys">
+      <button type="button" data-key="enter">Enter</button>
+      <button type="button" data-key="delete">⌫ Backspace</button>
+      <button type="button" data-key="tab">Tab</button>
+      <button type="button" data-key="escape">Esc</button>
+    </div>
+    <div class="row end"><button value="close">Close</button></div>
+  </form>
+</dialog>
+
+<dialog id="unlock-dialog" class="sheet">
+  <form method="dialog" id="unlock-form">
+    <h3>Unlock</h3>
+    <p class="muted small">Wakes the phone and swipes up. Enter your PIN or password to unlock a secured phone; it is sent once and not stored.</p>
+    <input id="unlock-pin" type="password" inputmode="numeric" autocomplete="off" placeholder="PIN (optional)">
+    <div class="row end">
+      <button value="close">Cancel</button>
+      <button value="unlock" class="primary">Unlock</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="menu-dialog" class="sheet">
+  <form method="dialog">
+    <h3>Options</h3>
+    <label class="field">Picture quality
+      <select id="quality">
+        <option value="9">Best</option>
+        <option value="6">Balanced</option>
+        <option value="3">Low bandwidth</option>
+        <option value="0">Lowest</option>
+      </select>
+    </label>
+    <div class="stack">
+      <button type="button" data-action="sleep">Turn screen off</button>
+      <button type="button" data-action="reconnect">Reconnect viewer</button>
+      <button type="button" data-action="restart">Restart mirroring</button>
+      <button type="button" data-action="logout" id="logout-btn">Sign out</button>
+    </div>
+    <p class="muted small" id="version"></p>
+    <div class="row end"><button value="close">Close</button></div>
+  </form>
+</dialog>
+
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>

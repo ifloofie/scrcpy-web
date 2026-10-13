@@ -1,0 +1,13 @@
+#!/bin/sh
+# set-display-size WIDTH HEIGHT - resize the virtual X display (Xvnc supports
+# arbitrary sizes through RandR). Connected VNC/noVNC clients are told about
+# the new size automatically.
+set -eu
+w="$1"; h="$2"; mode="${w}x${h}"
+out="$(xrandr | awk '/ connected/{print $1; exit}')"
+[ -n "$out" ] || { echo "set-display-size: no RandR output found" >&2; exit 1; }
+if ! xrandr | grep -q "^   ${mode} "; then
+  xrandr --newmode "$mode" 60 "$w" "$w" "$w" "$w" "$h" "$h" "$h" "$h" 2>/dev/null || true
+  xrandr --addmode "$out" "$mode"
+fi
+xrandr --fb "$mode" --output "$out" --mode "$mode"

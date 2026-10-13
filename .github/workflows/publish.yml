@@ -1,0 +1,104 @@
+name: Publish image
+
+# Builds multi-arch images and pushes them to GitHub Container Registry
+# (ghcr.io/<owner>/scrcpy-web), plus Docker Hub if configured.
+#  - every push to main          -> :latest, :main-<sha>, :scrcpy-<version>
+#  - every tag vX.Y.Z            -> :X.Y.Z, :X.Y, :X
+#  - every Monday (schedule)     -> rebuild :latest with current Ubuntu security updates
+#
+# Docker Hub (optional): set repository variable DOCKERHUB_IMAGE (e.g. "user/scrcpy-web")
+# and secrets DOCKERHUB_USERNAME + DOCKERHUB_TOKEN.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: publish-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Work out names and versions
+        id: info
+        run: |
+          echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+          echo "scrcpy=$(sed -n 's/^ARG SCRCPY_VERSION=//p' Dockerfile)" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=main-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      # Scheduled builds skip the cache for the runtime stage so that
+      # `apt-get upgrade` really picks up new security updates.
+      - name: Build for testing (amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: scrcpy-web:test
+          build-args: VERSION=${{ steps.info.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          no-cache-filters: ${{ github.event_name == 'schedule' && 'runtime' || '' }}
+
+      - name: Test
+        run: |
+          tests/run-unit-tests.sh scrcpy-web:test
+          tests/smoke.sh scrcpy-web:test
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - if: vars.DOCKERHUB_IMAGE != ''
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ steps.info.outputs.image }}
+            ${{ vars.DOCKERHUB_IMAGE }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=scrcpy-${{ steps.info.outputs.scrcpy }},enable={{is_default_branch}}
+            type=raw,value=${{ steps.info.outputs.version }},enable=${{ !startsWith(github.ref, 'refs/tags/') }}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+
+      - name: Build and push (amd64 + arm64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: VERSION=${{ steps.info.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          no-cache-filters: ${{ github.event_name == 'schedule' && 'runtime' || '' }}

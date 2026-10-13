@@ -1,0 +1,12 @@
+version: 2
+updates:
+  # Keep the GitHub Actions used by the workflows up to date.
+  # (scrcpy is handled by update-scrcpy.yml; the Ubuntu LTS base image is bumped
+  # by hand - see MAINTAINING.md - and refreshed weekly by publish.yml.)
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]

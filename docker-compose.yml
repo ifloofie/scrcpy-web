@@ -1,0 +1,45 @@
+# scrcpy-web - control a USB-connected Android phone from your browser.
+#
+#   1. cp .env.example .env   (and set WEB_PASSWORD)
+#   2. docker compose up -d
+#   3. open http://<server>:8080 and accept "Allow USB debugging" on the phone
+#
+# See README.md for every option.
+services:
+  scrcpy-web:
+    image: ghcr.io/ifloofie/scrcpy-web:latest
+    # build: .                 # uncomment to build from this repo instead
+    container_name: scrcpy-web
+    restart: unless-stopped
+
+    ports:
+      # Web UI. Docker-published ports bypass ufw; to keep it private, bind to
+      # your Tailscale/LAN address (e.g. "100.64.1.2:8080:8080") or to
+      # "127.0.0.1:8080:8080" and use `tailscale serve`. See README.
+      - "8080:8080"
+      # Native VNC apps (only listens when VNC_PASSWORD is set)
+      # - "5900:5900"
+      # ADB server for scrcpy/adb on another computer (needs ADB_EXPOSE=true)
+      # - "5037:5037"
+
+    env_file:
+      - path: .env
+        required: false
+
+    volumes:
+      # ADB keys (so "Always allow" is remembered), generated passwords, sessions
+      - scrcpy-web-data:/data
+      # USB access. Bind-mounting the whole bus plus the cgroup rule below keeps
+      # working when the phone reboots or is replugged (it gets a new device node).
+      - /dev/bus/usb:/dev/bus/usb
+    device_cgroup_rules:
+      - "c 189:* rmw"   # 189 = USB devices
+
+    # Hardening: none of the services need extra privileges.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  scrcpy-web-data:

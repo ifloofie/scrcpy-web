@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>scrcpy-web</Name>
+  <Repository>ghcr.io/ifloofie/scrcpy-web:latest</Repository>
+  <Registry>https://github.com/ifloofie/scrcpy-web/pkgs/container/scrcpy-web</Registry>
+  <Network>bridge</Network>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/ifloofie/scrcpy-web/issues</Support>
+  <Project>https://github.com/ifloofie/scrcpy-web</Project>
+  <Overview>Control an Android phone plugged into your Unraid server from any browser (including iPhone Safari) or VNC app, using scrcpy. Includes wake/unlock buttons, typing and pasting text, screenshots, and an HTTP API for automations. Enable USB debugging on the phone, plug it in, start the container and accept the "Allow USB debugging" prompt.</Overview>
+  <Category>Tools: Network:Remote</Category>
+  <WebUI>http://[IP]:[PORT:8080]/</WebUI>
+  <TemplateURL>https://raw.githubusercontent.com/ifloofie/scrcpy-web/main/unraid/scrcpy-web.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/ifloofie/scrcpy-web/main/rootfs/opt/scrcpy-web/app/static/icon-512.png</Icon>
+  <ExtraParams>--device-cgroup-rule='c 189:* rmw' --cap-drop=ALL --security-opt=no-new-privileges</ExtraParams>
+  <Config Name="Web UI port" Target="8080" Default="8080" Mode="tcp" Description="Web UI and API" Type="Port" Display="always" Required="true" Mask="false">8080</Config>
+  <Config Name="Web password" Target="WEB_PASSWORD" Default="" Description="Password for the web UI. Leave empty to have one generated (shown in the container log)." Type="Variable" Display="always" Required="false" Mask="true"/>
+  <Config Name="USB bus" Target="/dev/bus/usb" Default="/dev/bus/usb" Mode="rw" Description="USB access for ADB. Keep as is." Type="Path" Display="advanced" Required="true" Mask="false">/dev/bus/usb</Config>
+  <Config Name="Data" Target="/data" Default="/mnt/user/appdata/scrcpy-web" Mode="rw" Description="ADB keys, generated passwords and sessions" Type="Path" Display="advanced" Required="true" Mask="false">/mnt/user/appdata/scrcpy-web</Config>
+  <Config Name="Unlock PIN" Target="UNLOCK_PIN" Default="" Description="Optional PIN used by the Unlock button" Type="Variable" Display="always" Required="false" Mask="true"/>
+  <Config Name="API token" Target="API_TOKEN" Default="" Description="Optional bearer token for the HTTP API (automations, iOS Shortcuts, Home Assistant)" Type="Variable" Display="advanced" Required="false" Mask="true"/>
+  <Config Name="Max video size" Target="MAX_SIZE" Default="1280" Description="Longest side of the mirrored video in pixels (0 = native)" Type="Variable" Display="advanced" Required="false" Mask="false">1280</Config>
+  <Config Name="Max FPS" Target="MAX_FPS" Default="30" Description="Frame rate limit" Type="Variable" Display="advanced" Required="false" Mask="false">30</Config>
+  <Config Name="Video bit rate" Target="VIDEO_BIT_RATE" Default="8M" Description="scrcpy video bit rate" Type="Variable" Display="advanced" Required="false" Mask="false">8M</Config>
+  <Config Name="Stay awake" Target="STAY_AWAKE" Default="true" Description="Keep the phone awake while plugged in" Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
+  <Config Name="Turn phone screen off" Target="SCREEN_OFF" Default="false" Description="Turn the phone's own screen off while mirroring" Type="Variable" Display="advanced" Required="false" Mask="false">false</Config>
+  <Config Name="Wake on connect" Target="WAKE_ON_CONNECT" Default="true" Description="Wake the phone when the web UI is opened" Type="Variable" Display="advanced" Required="false" Mask="false">true</Config>
+  <Config Name="Device serial" Target="ADB_SERIAL" Default="" Description="Only needed if more than one Android device is connected" Type="Variable" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="Extra scrcpy arguments" Target="SCRCPY_ARGS" Default="" Description="Extra scrcpy flags, e.g. --show-touches" Type="Variable" Display="advanced" Required="false" Mask="false"/>
+  <Config Name="VNC password" Target="VNC_PASSWORD" Default="" Description="Set to open the native VNC port (max 8 characters)" Type="Variable" Display="advanced" Required="false" Mask="true"/>
+  <Config Name="VNC port" Target="5900" Default="5900" Mode="tcp" Description="Native VNC (only used when a VNC password is set)" Type="Port" Display="advanced" Required="false" Mask="false">5900</Config>
+</Container>

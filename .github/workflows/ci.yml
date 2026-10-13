@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint-and-unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: ShellCheck
+        run: |
+          shellcheck -x -e SC1091,SC2034 \
+            rootfs/opt/scrcpy-web/bin/*.sh rootfs/opt/scrcpy-web/bin/set-display-size \
+            tests/*.sh scripts/*.sh
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+
+      - name: Python lint and unit tests
+        run: |
+          pip install aiohttp pyflakes
+          python -m pyflakes rootfs/opt/scrcpy-web tests
+          python -m unittest discover -s tests -v
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: scrcpy-web:test
+          build-args: VERSION=ci-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Unit tests inside the image
+        run: tests/run-unit-tests.sh scrcpy-web:test
+
+      - name: Smoke test
+        run: tests/smoke.sh scrcpy-web:test
