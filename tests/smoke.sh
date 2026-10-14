@@ -93,4 +93,19 @@ elapsed=$(( $(date +%s) - start ))
 [ "$elapsed" -lt 8 ] || fail "docker stop took ${elapsed}s (signals not handled)"
 pass "clean shutdown in ${elapsed}s"
 
+# A client outside ALLOWED_NETWORKS is refused, while the health check keeps working
+docker rm -f "$NAME" >/dev/null
+docker run -d --name "$NAME" -e WEB_PASSWORD="$PW" -e ALLOWED_NETWORKS=10.123.0.0/16 \
+  -p "127.0.0.1:$PORT:8080" "$IMAGE" >/dev/null
+wait_healthy
+[ "$(curl -s -o /dev/null -w '%{http_code}' "$B/login")" = 403 ] || fail "client outside ALLOWED_NETWORKS was not refused"
+docker logs "$NAME" 2>&1 | grep -q "not in ALLOWED_NETWORKS" || fail "refused connection not logged"
+pass "clients outside ALLOWED_NETWORKS are refused"
+
+docker rm -f "$NAME" >/dev/null
+docker run -d --name "$NAME" -e WEB_PASSWORD="$PW" -p "127.0.0.1:$PORT:8080" "$IMAGE" >/dev/null
+wait_healthy
+[ "$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: rebind.attacker.example' "$B/login")" = 403 ] || fail "DNS-rebinding host name accepted"
+pass "unknown host names are refused (DNS rebinding)"
+
 echo "All smoke tests passed."

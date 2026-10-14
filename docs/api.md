@@ -6,7 +6,7 @@ Base URL: `http(s)://<server>:8080`.
 - a browser session (sign in at `/login`). State-changing requests (`POST`) must then also send the header `X-Requested-With: scrcpy-web`.
 - `Authorization: Bearer <API_TOKEN>`, which needs no extra header.
 
-**Responses.** Bodies are JSON (except screenshots). Errors look like `{"ok": false, "error": "…"}` with status `400` (bad input), `401` (not signed in), `403` (missing CSRF header) or `503` (the phone is not connected or ADB failed).
+**Responses.** Bodies are JSON (except screenshots). Errors look like `{"ok": false, "error": "…"}` with status `400` (bad input), `401` (not signed in), `403` (missing CSRF header, or a client/host name outside `ALLOWED_NETWORKS`/`ALLOWED_HOSTS`), `429` (too many wrong passwords or tokens from your address; wait and retry) or `503` (the phone is not connected or ADB failed).
 
 | Method | Path | Body | Description |
 |---|---|---|---|
@@ -56,6 +56,8 @@ Use the **Get Contents of URL** action:
 - Headers: `Authorization` = `Bearer <your API_TOKEN>`
 
 ## Home Assistant
+
+Home Assistant must be on your local network (or in `ALLOWED_NETWORKS`).
 
 ```yaml
 rest_command:

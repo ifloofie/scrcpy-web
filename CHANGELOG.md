@@ -1,5 +1,22 @@
 # Changelog
 
+## 2.1.0 (2026-10-14)
+
+Security hardening: local network only by default.
+
+### Security
+- **The web UI is published only on your LAN address.** The compose file requires `BIND_ADDRESS` instead of publishing `8080` on every interface, which included public IPv6 addresses and bypassed `ufw`.
+- **New client address check** (`ALLOWED_NETWORKS`, default `private`): requests from outside private network ranges are refused with 403 and logged.
+- **New DNS-rebinding protection** (`ALLOWED_HOSTS`, default `auto`): requests under non-local host names are refused.
+- **Wrong API tokens are now rate limited** like wrong passwords. Before, tokens could be guessed without limit.
+- The login page no longer displays text taken from the URL (prevents fake-message phishing).
+- Stricter post-login redirect validation (backslashes and control characters rejected).
+- The `Server` header no longer reveals Python/aiohttp versions. Security headers are also sent on redirects. HSTS is sent over direct HTTPS.
+- GitHub Actions are pinned to commit SHAs. The scrcpy update workflow validates the upstream version string and no longer pastes it into shell commands.
+
+### Upgrading from 2.0
+Add `BIND_ADDRESS=<your server's LAN IP>` (and optionally `ALLOWED_NETWORKS`) to `.env`, then `docker compose up -d`. If you reach the UI over Tailscale, add `100.64.0.0/10` to `ALLOWED_NETWORKS`. If you use your own domain name, add it to `ALLOWED_HOSTS`.
+
 ## 2.0.0 (2026-10-13)
 
 First release of this fork of [robotfishe/scrcpy-web](https://github.com/robotfishe/scrcpy-web), rebuilt from the ground up.

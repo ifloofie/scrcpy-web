@@ -1,8 +1,10 @@
 # scrcpy-web - control a USB-connected Android phone from your browser.
 #
-#   1. cp .env.example .env   (and set WEB_PASSWORD)
+#   1. cp .env.example .env   (set BIND_ADDRESS and WEB_PASSWORD)
 #   2. docker compose up -d
-#   3. open http://<server>:8080 and accept "Allow USB debugging" on the phone
+#   3. open http://<BIND_ADDRESS>:8080 and accept "Allow USB debugging" on the phone
+#
+# It is reachable from your local network only. See "Security" in README.md.
 #
 # See README.md for every option.
 services:
@@ -13,14 +15,15 @@ services:
     restart: unless-stopped
 
     ports:
-      # Web UI. Docker-published ports bypass ufw; to keep it private, bind to
-      # your Tailscale/LAN address (e.g. "100.64.1.2:8080:8080") or to
-      # "127.0.0.1:8080:8080" and use `tailscale serve`. See README.
-      - "8080:8080"
+      # Web UI, published ONLY on BIND_ADDRESS (set it in .env to this server's
+      # LAN IP, e.g. 192.168.1.50). Never use a bare "8080:8080": that listens
+      # on every interface, including public IPv6 addresses, and Docker
+      # bypasses ufw. Also never port-forward 8080 on your router.
+      - "${BIND_ADDRESS:?Set BIND_ADDRESS in .env to this server's LAN IP address (e.g. 192.168.1.50)}:8080:8080"
       # Native VNC apps (only listens when VNC_PASSWORD is set)
-      # - "5900:5900"
+      # - "${BIND_ADDRESS}:5900:5900"
       # ADB server for scrcpy/adb on another computer (needs ADB_EXPOSE=true)
-      # - "5037:5037"
+      # - "${BIND_ADDRESS}:5037:5037"
 
     env_file:
       - path: .env

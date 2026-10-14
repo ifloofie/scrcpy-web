@@ -74,9 +74,44 @@ class ParserTests(unittest.TestCase):
 
     def test_safe_next(self):
         self.assertEqual(server.safe_next("/api/status"), "/api/status")
-        self.assertEqual(server.safe_next("//evil.example/"), "/")
-        self.assertEqual(server.safe_next("https://evil.example/"), "/")
-        self.assertEqual(server.safe_next(None), "/")
+        self.assertEqual(server.safe_next("/?a=1"), "/?a=1")
+        for bad in ("//evil.example/", "https://evil.example/", "/\\evil.example", "/\t/evil.example",
+                    "/\n/evil.example", "evil.example", None, ""):
+            self.assertEqual(server.safe_next(bad), "/", bad)
+
+
+class AccessControlTests(unittest.TestCase):
+    def test_default_networks_are_private_only(self):
+        nets = server.parse_networks("private")
+        for ip in ("192.168.1.20", "10.0.0.5", "172.20.1.1", "fd12::1", "fe80::1%eth0",
+                   "::ffff:192.168.1.20", "127.0.0.1", "::1"):
+            self.assertTrue(server.ip_allowed(ip, nets), ip)
+        for ip in ("8.8.8.8", "41.0.0.1", "2001:4860::8888", "100.64.0.1", "::ffff:8.8.8.8", None, "garbage"):
+            self.assertFalse(server.ip_allowed(ip, nets), ip)
+
+    def test_custom_networks(self):
+        nets = server.parse_networks("192.168.1.0/24, 100.64.0.0/10")
+        self.assertTrue(server.ip_allowed("192.168.1.9", nets))
+        self.assertTrue(server.ip_allowed("100.101.1.2", nets))
+        self.assertFalse(server.ip_allowed("192.168.2.9", nets))
+        self.assertTrue(server.ip_allowed("127.0.0.1", nets))  # health check always works
+        self.assertIsNone(server.parse_networks("any"))
+        self.assertTrue(server.ip_allowed("8.8.8.8", None))
+        with self.assertRaises(SystemExit):
+            server.parse_networks("not-a-network")
+
+    def test_host_names(self):
+        auto = server.parse_hosts("auto")
+        for h in ("192.168.1.20:8080", "[fd00::1]:8080", "localhost:8080", "server", "server.lan",
+                  "phone.local", "box.tail1234.ts.net", "nas.home.arpa"):
+            self.assertTrue(server.host_allowed(h, auto), h)
+        for h in ("evil.example", "192.168.1.20.nip.io", "attacker.com:8080", "", None):
+            self.assertFalse(server.host_allowed(h, auto), h)
+        custom = server.parse_hosts("auto, phone.example.com, *.mydomain.net")
+        self.assertTrue(server.host_allowed("phone.example.com", custom))
+        self.assertTrue(server.host_allowed("a.mydomain.net:443", custom))
+        self.assertFalse(server.host_allowed("evil.example", custom))
+        self.assertIsNone(server.parse_hosts("any"))
 
 
 class AuthTests(unittest.TestCase):
@@ -198,6 +233,35 @@ class HttpAuthTests(ServerTestCase):
         await self.client.post("/logout", allow_redirects=False)
         r = await self.client.get("/api/status")
         self.assertEqual(r.status, 401)
+
+    async def test_rebinding_host_refused(self):
+        r = await self.client.get("/login", headers={"Host": "attacker-rebind.example"})
+        self.assertEqual(r.status, 403)
+        r = await self.client.get("/login", headers={"Host": "192.168.1.20:8080"})
+        self.assertEqual(r.status, 200)
+
+    async def test_login_error_text_cannot_be_injected(self):
+        r = await self.client.get("/login?error=Sign%20in%20at%20evil.example")
+        self.assertNotIn("evil.example", await r.text())
+        r = await self.client.get("/login?error=wrong")
+        self.assertIn("Wrong password", await r.text())
+
+    async def test_api_token_guessing_is_rate_limited(self):
+        statuses = []
+        for i in range(7):
+            r = await self.client.get("/api/status", headers={"Authorization": f"Bearer guess{i}"})
+            statuses.append(r.status)
+        self.assertEqual(statuses[:5], [401] * 5)
+        self.assertIn(429, statuses[5:])
+        # even the right token is refused while locked out
+        r = await self.client.get("/api/status", headers={"Authorization": "Bearer api-token-1"})
+        self.assertEqual(r.status, 429)
+
+    async def test_server_header_hides_versions(self):
+        r = await self.client.get("/login")
+        self.assertEqual(r.headers["Server"], "scrcpy-web")
+        r = await self.client.get("/", allow_redirects=False)
+        self.assertEqual(r.headers["X-Frame-Options"], "DENY")  # headers on redirects too
 
     async def test_security_headers(self):
         r = await self.client.get("/login")

@@ -16,7 +16,8 @@ scrcpy-web runs [scrcpy](https://github.com/Genymobile/scrcpy) inside a Docker c
 - **Rotation aware.** The view follows the phone between portrait and landscape with no black bars.
 - **Robust.** Every service is supervised and restarted. The phone is picked up again after it reboots or is replugged, and `docker stop` is instant.
 - **Secure by default.**
-  - The web UI requires a password, with rate-limited login and CSRF protection.
+  - Local network only: published on your LAN address only, refuses clients from outside private network ranges, and blocks DNS-rebinding attacks.
+  - The web UI requires a password, with rate-limited login and API tokens, and CSRF protection.
   - Each install generates its own ADB key.
   - Raw VNC and ADB ports stay closed unless you enable them.
   - The container runs with every Linux capability dropped.
@@ -31,11 +32,12 @@ scrcpy-web runs [scrcpy](https://github.com/Genymobile/scrcpy) inside a Docker c
 2. **On the server:**
    ```sh
    git clone https://github.com/ifloofie/scrcpy-web.git && cd scrcpy-web
-   cp .env.example .env        # set WEB_PASSWORD in here
+   cp .env.example .env        # set BIND_ADDRESS and WEB_PASSWORD in here
    docker compose up -d
    ```
+   `BIND_ADDRESS` is the server's LAN IP (find it with `ip -4 addr show`). Compose refuses to start without it, so the UI is never accidentally published on every interface.
 3. **Approve the phone.** Unlock it and accept *Allow USB debugging?*, ticking **Always allow from this computer**.
-4. Open `http://<server>:8080` and sign in.
+4. Open `http://<BIND_ADDRESS>:8080` from a device on your network and sign in.
 
 If you didn't set `WEB_PASSWORD`, a password was generated. Find it with `docker logs scrcpy-web | grep password`.
 
@@ -44,7 +46,7 @@ If you didn't set `WEB_PASSWORD`, a password was generated. Find it with `docker
 
 ```sh
 docker run -d --name scrcpy-web --restart unless-stopped \
-  -p 8080:8080 \
+  -p 192.168.1.50:8080:8080 \
   -e WEB_PASSWORD='choose-a-password' \
   -v scrcpy-web-data:/data \
   -v /dev/bus/usb:/dev/bus/usb \
@@ -58,24 +60,22 @@ docker run -d --name scrcpy-web --restart unless-stopped \
 
 Use the template in [`unraid/scrcpy-web.xml`](unraid/scrcpy-web.xml). In Docker › Add Container, paste the template's raw URL into *Template repositories* in Docker settings, or copy the file to `/boot/config/plugins/dockerMan/templates-user/`.
 
-## Reaching it from anywhere
+## Network access: local network only
 
-The easiest secure option is [Tailscale](https://tailscale.com). Bind the port to localhost and let Tailscale serve it over HTTPS with a real certificate:
+scrcpy-web controls your phone, so by default it can only be reached from your local network. Three layers enforce this:
 
-```yaml
-# docker-compose.yml
-    ports:
-      - "127.0.0.1:8080:8080"
-```
-```sh
-sudo tailscale serve --bg 8080
-```
+1. **Bind address.** The compose file publishes port 8080 *only* on `BIND_ADDRESS`, your server's LAN IP. It isn't published on any other interface, such as a public IPv6 address or a VPS's public IP. This matters because Docker-published ports **bypass `ufw`**, and a bare `8080:8080` listens everywhere.
+2. **Client address check** (`ALLOWED_NETWORKS`, default `private`). The server answers `403` to any client whose address isn't in a private range (`192.168.x.x`, `10.x.x.x`, `172.16–31.x.x`, IPv6 ULA and link-local). If the port were ever forwarded from the internet, those requests are refused. For extra safety, narrow it to your own subnet: `ALLOWED_NETWORKS=192.168.1.0/24`.
+3. **Host-name check** (`ALLOWED_HOSTS`, default `auto`). A malicious website could otherwise use *DNS rebinding* to make your browser talk to the server under the attacker's domain. Only IP addresses, single-word names and local names (`.local`, `.lan`, `.home.arpa`, `.internal`, `.ts.net`, …) are accepted. Add your own domain if you use one: `ALLOWED_HOSTS=auto,phone.example.com`.
 
-Then open `https://<server-name>.<your-tailnet>.ts.net` on any device signed in to your tailnet. HTTPS also lets the iPhone treat it as a proper home-screen app: Share › *Add to Home Screen*.
+Your part:
+- **Don't** forward port 8080 (or 5900/5037) on your router, and don't use `tailscale funnel`.
+- Give the server a fixed LAN IP (a DHCP reservation in the router), so `BIND_ADDRESS` stays valid.
+- Use a strong `WEB_PASSWORD`. On a LAN over plain HTTP, other devices on the network could in principle observe traffic. Use HTTPS (below) if you share the network with devices you don't trust.
 
-> **Docker and firewalls.** Ports published by Docker bypass `ufw`. Don't rely on ufw to protect `8080`, `5900` or `5037`. Bind them to a specific address instead, such as `127.0.0.1` (with `tailscale serve`) or your Tailscale IP (`100.x.y.z:8080:8080`).
+**Optional: from outside your home, privately.** [Tailscale](https://tailscale.com) is a private VPN, not the public internet. Add `100.64.0.0/10` to `ALLOWED_NETWORKS`, then on the server run `sudo tailscale serve --bg http://<BIND_ADDRESS>:8080`. Only devices signed in to your tailnet can open `https://<server>.<tailnet>.ts.net`, and it gets a real HTTPS certificate, so the iPhone can also use Share › *Add to Home Screen*.
 
-To serve HTTPS directly, mount a certificate and set `TLS_CERT` and `TLS_KEY`. Behind your own reverse proxy (Caddy, nginx, Traefik), forward WebSocket upgrades for `/websockify`.
+**HTTPS on the LAN.** Mount a certificate and set `TLS_CERT` and `TLS_KEY`. Behind your own reverse proxy (Caddy, nginx, Traefik), forward WebSocket upgrades for `/websockify`, and add its host name to `ALLOWED_HOSTS`.
 
 ## Using the web UI
 
@@ -95,7 +95,7 @@ Tap and drag on the screen to tap and swipe on the phone. On a computer, click t
 
 ## Native VNC (optional)
 
-Set `VNC_PASSWORD` (8 characters at most, a limit of the VNC protocol) and publish port `5900`. Any VNC app can then connect: RealVNC Viewer, Screens and others. VNC is unencrypted, so only use it over Tailscale or a LAN. When no VNC password is set, the VNC port isn't opened at all, and the web UI talks to the display over a private socket.
+Set `VNC_PASSWORD` (8 characters at most, a limit of the VNC protocol) and publish port `5900`. Any VNC app can then connect: RealVNC Viewer, Screens and others. VNC is unencrypted, so only use it on your LAN. Publish it on your LAN address only: `"${BIND_ADDRESS}:5900:5900"`. The app's address and host-name checks don't apply to raw VNC. When no VNC password is set, the VNC port isn't opened at all, and the web UI talks to the display over a private socket.
 
 ## Using scrcpy on your PC (optional)
 
@@ -107,11 +107,19 @@ $env:ADB_SERVER_SOCKET = "tcp:<server-ip>:5037"
 scrcpy
 ```
 
-The ADB server has **no authentication**. Only expose it over Tailscale or a trusted LAN.
+The ADB server has **no authentication**, and the address checks don't apply to it. Anyone who can reach port 5037 has full control of the phone. Only enable it on a trusted LAN, published on your LAN address only (`"${BIND_ADDRESS}:5037:5037"`).
 
 ## Configuration
 
 Every setting is an environment variable, and all are optional. Settings marked † also accept a `*_FILE` variant (for example `WEB_PASSWORD_FILE=/run/secrets/web_password`) for Docker secrets.
+
+### Network access
+
+| Variable | Default | Description |
+|---|---|---|
+| `BIND_ADDRESS` | *(required by compose)* | The server's LAN IP; port 8080 is published on this address only. |
+| `ALLOWED_NETWORKS` | `private` | Client networks allowed to connect: `private`, or a comma list of CIDRs (may include `private`), e.g. `192.168.1.0/24,100.64.0.0/10`. `any` turns the check off (don't). |
+| `ALLOWED_HOSTS` | `auto` | Host names the UI may be reached under (DNS-rebinding protection). `auto` accepts IPs and local names; add your own like `auto,phone.example.com` or `auto,*.example.com`. |
 
 ### Web UI and API
 
@@ -173,6 +181,9 @@ curl -H "Authorization: Bearer $TOKEN" -o shot.png http://server:8080/api/screen
 
 | Problem | Fix |
 |---|---|
+| "Forbidden: this server only accepts connections from the local network" | Your device's address isn't in `ALLOWED_NETWORKS`. Check `docker logs scrcpy-web` for the refused address. For Tailscale, add `100.64.0.0/10`. |
+| "Forbidden: unknown host name" | You're using a domain name that isn't local. Add it to `ALLOWED_HOSTS`. |
+| Compose says `required variable BIND_ADDRESS is missing` | Set `BIND_ADDRESS` in `.env` to the server's LAN IP. |
 | "Waiting for the phone" | Check USB debugging is on and the cable carries data. Run `docker exec scrcpy-web adb devices`. If nothing is listed, check that `/dev/bus/usb` is mounted and the `c 189:* rmw` cgroup rule is set. |
 | "Allow USB debugging" | Unlock the phone and accept the prompt. If it never appears: Developer options › *Revoke USB debugging authorizations*, then replug. |
 | Phone not found after a reboot or replug | Usually a missing `device_cgroup_rules` entry. Older setups that used `--device=/dev/bus` lose the phone when its device node changes. |

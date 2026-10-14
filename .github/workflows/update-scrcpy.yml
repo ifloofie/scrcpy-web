@@ -22,7 +22,7 @@ jobs:
   update:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       - name: Check for a new scrcpy release
         id: check
@@ -32,6 +32,12 @@ jobs:
           current="$(sed -n 's/^ARG SCRCPY_VERSION=//p' Dockerfile)"
           latest="$(gh api repos/Genymobile/scrcpy/releases/latest --jq .tag_name)"
           latest="${latest#v}"
+          # The tag comes from another repository: accept only a plain version
+          # number before it is used anywhere else in this workflow.
+          if ! printf '%s' "$latest" | grep -Eq '^[0-9]+(\.[0-9]+){0,3}$'; then
+            echo "::error::Unexpected scrcpy release tag: $latest"
+            exit 1
+          fi
           echo "current=$current latest=$latest"
           echo "current=$current" >> "$GITHUB_OUTPUT"
           echo "latest=$latest" >> "$GITHUB_OUTPUT"
@@ -41,14 +47,16 @@ jobs:
           fi
 
       - if: steps.check.outputs.update == 'true'
-        run: scripts/bump-scrcpy.sh "${{ steps.check.outputs.latest }}"
+        env:
+          LATEST: ${{ steps.check.outputs.latest }}
+        run: scripts/bump-scrcpy.sh "$LATEST"
 
       - if: steps.check.outputs.update == 'true'
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - if: steps.check.outputs.update == 'true'
         name: Build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           load: true
@@ -66,16 +74,17 @@ jobs:
         name: Commit to main and publish
         env:
           GH_TOKEN: ${{ github.token }}
+          LATEST: ${{ steps.check.outputs.latest }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git commit -am "Update scrcpy to ${{ steps.check.outputs.latest }}"
+          git commit -am "Update scrcpy to $LATEST"
           git push
           gh workflow run publish.yml --ref main
 
       - if: steps.check.outputs.update == 'true' && vars.AUTO_UPDATE != 'true'
         name: Open pull request
-        uses: peter-evans/create-pull-request@v7
+        uses: peter-evans/create-pull-request@22a9089034f40e5a961c8808d113e2c98fb63676 # v7
         with:
           branch: update/scrcpy-${{ steps.check.outputs.latest }}
           commit-message: Update scrcpy to ${{ steps.check.outputs.latest }}
@@ -89,8 +98,11 @@ jobs:
         name: Report a failed update
         env:
           GH_TOKEN: ${{ github.token }}
+          LATEST: ${{ steps.check.outputs.latest }}
+          CURRENT: ${{ steps.check.outputs.current }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          title="scrcpy ${{ steps.check.outputs.latest }} does not build or pass tests"
+          title="scrcpy $LATEST does not build or pass tests"
           if ! gh issue list --state open --search "$title in:title" --json number --jq '.[0].number' | grep -q .; then
-            gh issue create --title "$title" --body "The weekly update check could not move to scrcpy ${{ steps.check.outputs.latest }}. See ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }} for the log. The published image stays on ${{ steps.check.outputs.current }} until this is fixed."
+            gh issue create --title "$title" --body "The weekly update check could not move to scrcpy $LATEST. See $RUN_URL for the log. The published image stays on $CURRENT until this is fixed."
           fi

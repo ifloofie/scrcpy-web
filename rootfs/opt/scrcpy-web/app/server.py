@@ -13,6 +13,7 @@ import asyncio
 import hashlib
 import hmac
 import html
+import ipaddress
 import json
 import logging
 import os
@@ -77,6 +78,93 @@ def _env_bool(name: str, default: bool) -> bool:
     return value.strip().lower() in ("1", "true", "yes", "on")
 
 
+# Networks that can't be reached from the internet. 100.64.0.0/10 (Tailscale,
+# but also ISP carrier-grade NAT) is deliberately not included; add it
+# explicitly if you need it.
+PRIVATE_NETWORKS = (
+    "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16",
+    "fc00::/7", "fe80::/10",
+)
+LOOPBACK_NETWORKS = [ipaddress.ip_network(n) for n in ("127.0.0.0/8", "::1/128")]
+
+# Host-name suffixes that only resolve on a local network or a private VPN.
+LOCAL_HOST_SUFFIXES = (
+    ".local", ".lan", ".home", ".home.arpa", ".internal", ".localdomain",
+    ".intranet", ".corp", ".private", ".ts.net",
+)
+
+
+def parse_networks(value: str | None) -> list | None:
+    """ALLOWED_NETWORKS: "private" (default), "any", or a comma-separated list of
+    CIDRs/IPs, which may include the word "private"."""
+    tokens = [t.strip().lower() for t in (value or "private").split(",") if t.strip()]
+    if "any" in tokens:
+        return None
+    nets = []
+    for t in tokens:
+        if t == "private":
+            nets += [ipaddress.ip_network(n) for n in PRIVATE_NETWORKS]
+            continue
+        try:
+            nets.append(ipaddress.ip_network(t, strict=False))
+        except ValueError:
+            raise SystemExit(f"ALLOWED_NETWORKS: '{t}' is not a valid network (e.g. 192.168.1.0/24)")
+    return nets
+
+
+def parse_hosts(value: str | None) -> list | None:
+    """ALLOWED_HOSTS: "auto" (default), "any", or a comma-separated list of host
+    names (with optional "*." wildcards), which may include the word "auto"."""
+    tokens = [t.strip().lower() for t in (value or "auto").split(",") if t.strip()]
+    if "any" in tokens:
+        return None
+    return tokens
+
+
+def ip_allowed(remote: str | None, networks: list | None) -> bool:
+    if networks is None:
+        return True
+    if not remote:
+        return False
+    try:
+        ip = ipaddress.ip_address(remote.split("%", 1)[0])
+    except ValueError:
+        return False
+    if ip.version == 6 and ip.ipv4_mapped:
+        ip = ip.ipv4_mapped
+    if any(ip in n for n in LOOPBACK_NETWORKS):
+        return True  # the container's own health check
+    return any(ip.version == n.version and ip in n for n in networks)
+
+
+def host_allowed(host_header: str | None, allowed: list | None) -> bool:
+    if allowed is None:
+        return True
+    if not host_header:
+        return False
+    host = host_header.strip().lower()
+    if host.startswith("["):  # [IPv6]:port
+        host = host[1:].split("]", 1)[0]
+    elif host.count(":") == 1:
+        host = host.split(":", 1)[0]
+    host = host.rstrip(".")
+    for rule in allowed:
+        if rule == "auto":
+            try:
+                ipaddress.ip_address(host)
+                return True  # a bare IP can't be a rebinding attacker's domain
+            except ValueError:
+                pass
+            if host == "localhost" or "." not in host or host.endswith(LOCAL_HOST_SUFFIXES):
+                return True
+        elif rule.startswith("*."):
+            if host.endswith(rule[1:]):
+                return True
+        elif host == rule:
+            return True
+    return False
+
+
 @dataclass
 class Config:
     web_auth: str = "password"  # "password" or "none"
@@ -88,6 +176,10 @@ class Config:
     session_days: int = 30
     wake_on_connect: bool = True
     allow_framing: bool = False
+    # Who may connect: list of networks, or None for anyone (ALLOWED_NETWORKS=any)
+    allowed_networks: list | None = field(default_factory=lambda: parse_networks("private"))
+    # Host names the UI may be reached under (DNS-rebinding protection), or None for any
+    allowed_hosts: list | None = field(default_factory=lambda: parse_hosts("auto"))
     serial: str | None = None
     adb_bin: str = "adb"
     host: str = "0.0.0.0"
@@ -116,6 +208,8 @@ class Config:
             session_days=int(os.environ.get("SESSION_DAYS", "30")),
             wake_on_connect=_env_bool("WAKE_ON_CONNECT", True),
             allow_framing=_env_bool("ALLOW_FRAMING", False),
+            allowed_networks=parse_networks(os.environ.get("ALLOWED_NETWORKS", "private")),
+            allowed_hosts=parse_hosts(os.environ.get("ALLOWED_HOSTS", "auto")),
             serial=os.environ.get("ADB_SERIAL") or None,
             adb_bin=os.environ.get("ADB_BIN", "adb"),
             host=os.environ.get("WEB_HOST", "0.0.0.0"),
@@ -420,11 +514,22 @@ class Auth:
     def valid_token(self, header: str | None) -> bool:
         if not self.cfg.api_token or not header or not header.startswith("Bearer "):
             return False
-        return hmac.compare_digest(header[7:].strip(), self.cfg.api_token)
+        return hmac.compare_digest(header[7:].strip().encode(), self.cfg.api_token.encode())
 
     def locked_out(self, ip: str) -> float:
         count, until = self._failures.get(ip, (0, 0.0))
         return max(0.0, until - time.time())
+
+    def record_failure(self, ip: str) -> None:
+        """Counts a wrong password or API token. After MAX_FREE_ATTEMPTS the IP
+        is locked out for 30 s, doubling with each further failure (max 1 h)."""
+        now = time.time()
+        if len(self._failures) > 10000:  # bound memory: forget stale entries
+            self._failures = {k: v for k, v in self._failures.items() if v[1] > now - 3600}
+        count, _ = self._failures.get(ip, (0, 0.0))
+        count += 1
+        delay = 0.0 if count < self.MAX_FREE_ATTEMPTS else min(3600.0, 30.0 * 2 ** (count - self.MAX_FREE_ATTEMPTS))
+        self._failures[ip] = (count, now + delay)
 
     def check_password(self, ip: str, password: str) -> bool:
         ok = bool(self.cfg.web_password) and hmac.compare_digest(
@@ -433,10 +538,7 @@ class Auth:
         if ok:
             self._failures.pop(ip, None)
             return True
-        count, _ = self._failures.get(ip, (0, 0.0))
-        count += 1
-        delay = 0.0 if count < self.MAX_FREE_ATTEMPTS else min(3600.0, 30.0 * 2 ** (count - self.MAX_FREE_ATTEMPTS))
-        self._failures[ip] = (count, time.time() + delay)
+        self.record_failure(ip)
         return False
 
     def request_auth(self, request: web.Request) -> str | None:
@@ -455,6 +557,7 @@ CFG = web.AppKey("cfg", Config)
 AUTH = web.AppKey("auth", Auth)
 DEVICE = web.AppKey("device", Device)
 SCRCPY_VERSION = web.AppKey("scrcpy_version", str)
+WARNED_IPS = web.AppKey("warned_ips", set)
 
 
 # ---------------------------------------------------------------------------
@@ -472,9 +575,34 @@ def json_error(status: int, message: str) -> web.Response:
 
 
 @web.middleware
-async def security_headers(request: web.Request, handler):
-    resp = await handler(request)
+async def access_guard(request: web.Request, handler):
+    """Only serve the local network, and only under local host names."""
     cfg: Config = request.app[CFG]
+    if not ip_allowed(request.remote, cfg.allowed_networks):
+        warned: set = request.app[WARNED_IPS]
+        if request.remote not in warned and len(warned) < 1000:
+            warned.add(request.remote)
+            log.warning("refused connection from %s (not in ALLOWED_NETWORKS)", request.remote)
+        return web.Response(status=403, text="Forbidden: this server only accepts connections from the local network.\n")
+    if not host_allowed(request.host, cfg.allowed_hosts):
+        return web.Response(
+            status=403,
+            text=f"Forbidden: unknown host name '{request.host}'. If this is how you reach the server, "
+            "add it to ALLOWED_HOSTS (e.g. ALLOWED_HOSTS=auto,phone.example.com).\n",
+        )
+    return await handler(request)
+
+
+@web.middleware
+async def security_headers(request: web.Request, handler):
+    try:
+        resp = await handler(request)
+    except web.HTTPException as e:  # redirects etc. get the headers too
+        resp = e
+    cfg: Config = request.app[CFG]
+    resp.headers["Server"] = "scrcpy-web"
+    if request.secure:
+        resp.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
     resp.headers.setdefault("X-Content-Type-Options", "nosniff")
     resp.headers.setdefault("Referrer-Policy", "no-referrer")
     csp = (
@@ -485,6 +613,8 @@ async def security_headers(request: web.Request, handler):
         resp.headers.setdefault("X-Frame-Options", "DENY")
         csp += "; frame-ancestors 'none'"
     resp.headers.setdefault("Content-Security-Policy", csp)
+    if isinstance(resp, web.HTTPException):
+        raise resp
     return resp
 
 
@@ -495,6 +625,16 @@ async def require_auth(request: web.Request, handler):
     if path in PUBLIC_PATHS or path.startswith("/static/"):
         return await handler(request)
     method = auth.request_auth(request)
+    if method is None and request.headers.get("Authorization") and auth.cfg.web_auth != "none":
+        # wrong API token: rate limited exactly like wrong passwords
+        ip = request.remote or "?"
+        if auth.locked_out(ip) > 0:
+            return json_error(429, "too many failed attempts, try again later")
+        auth.record_failure(ip)
+        log.warning("invalid API token from %s", ip)
+        await asyncio.sleep(1)
+    elif method == "token" and auth.locked_out(request.remote or "?") > 0:
+        return json_error(429, "too many failed attempts, try again later")
     if method is None:
         if path.startswith("/api/") or path == "/websockify":
             return json_error(401, "authentication required")
@@ -529,18 +669,30 @@ LOGIN_PAGE = """<!doctype html>
 </body></html>"""
 
 
+LOGIN_ERRORS = {
+    "wrong": "Wrong password",
+    "locked": "Too many attempts. Wait a while and try again.",
+}
+
+
 def safe_next(value: str | None) -> str:
-    # only allow local paths, never another host
-    if value and value.startswith("/") and not value.startswith("//"):
-        return value
-    return "/"
+    """Only allow a local path to redirect to after login, never another host."""
+    if not value or not value.startswith("/") or value.startswith("//"):
+        return "/"
+    if "\\" in value or any(ord(c) < 0x20 or ord(c) == 0x7F for c in value):
+        return "/"
+    parsed = urlparse(value)
+    if parsed.scheme or parsed.netloc:
+        return "/"
+    return value
 
 
 async def login_page(request: web.Request) -> web.Response:
     cfg: Config = request.app[CFG]
     if cfg.web_auth == "none":
         raise web.HTTPFound("/")
-    msg = request.query.get("error")
+    # only fixed messages: the URL can't put arbitrary text on the login page
+    msg = LOGIN_ERRORS.get(request.query.get("error", ""))
     error = f'<p class="error" role="alert">{html.escape(msg)}</p>' if msg else ""
     body = LOGIN_PAGE.replace("{error}", error).replace(
         "{next}", html.escape(safe_next(request.query.get("next")), quote=True)
@@ -555,11 +707,11 @@ async def login_submit(request: web.Request) -> web.Response:
     ip = request.remote or "?"
     wait = auth.locked_out(ip)
     if wait > 0:
-        raise web.HTTPFound(f"/login?next={quote(nxt, safe='')}&error=" + quote(f"Too many attempts, try again in {int(wait) + 1}s"))
+        raise web.HTTPFound(f"/login?next={quote(nxt, safe='')}&error=locked")
     if not auth.check_password(ip, str(form.get("password", ""))):
         log.warning("failed login from %s", ip)
         await asyncio.sleep(1)
-        raise web.HTTPFound(f"/login?next={quote(nxt, safe='')}&error=" + quote("Wrong password"))
+        raise web.HTTPFound(f"/login?next={quote(nxt, safe='')}&error=wrong")
     log.info("login from %s", ip)
     resp = web.HTTPFound(nxt)
     resp.set_cookie(
@@ -799,8 +951,9 @@ async def _detect_scrcpy_version(app: web.Application) -> None:
 
 
 def create_app(cfg: Config) -> web.Application:
-    app = web.Application(middlewares=[security_headers, require_auth], client_max_size=64 * 1024)
+    app = web.Application(middlewares=[security_headers, access_guard, require_auth], client_max_size=64 * 1024)
     app[CFG] = cfg
+    app[WARNED_IPS] = set()
     app[AUTH] = Auth(cfg)
     app[DEVICE] = Device(cfg)
     app.on_startup.append(_detect_scrcpy_version)
@@ -840,6 +993,12 @@ def main() -> None:
         ssl_ctx = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
         ssl_ctx.load_cert_chain(cfg.tls_cert, cfg.tls_key)
     log.info("listening on %s://%s:%d", "https" if ssl_ctx else "http", cfg.host, cfg.port)
+    if cfg.allowed_networks is None:
+        log.warning("ALLOWED_NETWORKS=any: connections are accepted from ANY address")
+    else:
+        log.info("accepting connections from: %s", ", ".join(str(n) for n in cfg.allowed_networks) + " (+ loopback)")
+    if cfg.allowed_hosts is None:
+        log.warning("ALLOWED_HOSTS=any: DNS-rebinding protection is off")
     web.run_app(create_app(cfg), host=cfg.host, port=cfg.port, ssl_context=ssl_ctx, access_log=None, print=None)
 
 
