@@ -127,6 +127,114 @@ function pasteText(text) {
   }, 150);
 }
 
+// ---------------------------------------------------------------- scrolling
+// Spring-loaded scroll slider. Scrolling is sent as mouse-wheel steps through
+// the viewer (scrcpy turns them into Android scroll events), so it works in
+// almost every app. Drag distance from the middle picks one of 5 speeds.
+const scroller = $('#scroller');
+const scrollTrack = $('#scroll-track');
+const scrollThumb = $('#scroll-thumb');
+const scrollFill = $('#scroll-fill');
+const speedBadge = $('#speed-badge');
+document.body.appendChild(speedBadge); // outside the pill so its blur/clipping can't hide it
+const SCROLL_RATES = [0, 3, 6, 11, 18, 30]; // wheel steps per second for speed 0-5
+const SCROLL_DEADZONE = 6; // px of movement before scrolling starts
+const scroll = { level: 0, dir: 0, timer: null, startY: 0, pointer: null };
+
+function wheelStep(dir) {
+  // Synthesise a wheel event over the middle of the phone picture; noVNC turns
+  // it into a VNC wheel button press at that spot.
+  const canvas = screenEl.querySelector('canvas');
+  if (!canvas || !state.connected) return;
+  const r = canvas.getBoundingClientRect();
+  canvas.dispatchEvent(new WheelEvent('wheel', {
+    deltaY: dir * 50, deltaMode: 0, bubbles: true, cancelable: true,
+    clientX: r.left + r.width / 2, clientY: r.top + r.height / 2,
+  }));
+}
+
+function scrollLoop() {
+  clearTimeout(scroll.timer);
+  if (!scroll.level) return;
+  wheelStep(scroll.dir);
+  scroll.timer = setTimeout(scrollLoop, 1000 / SCROLL_RATES[scroll.level]);
+}
+
+function setScrollOffset(dy) {
+  const max = scrollTrack.clientHeight / 2 - 22;
+  const off = Math.max(-max, Math.min(max, dy));
+  scrollThumb.style.transform = `translateY(${off}px)`;
+  const level = Math.abs(off) < SCROLL_DEADZONE ? 0
+    : Math.min(5, Math.ceil(((Math.abs(off) - SCROLL_DEADZONE) / (max - SCROLL_DEADZONE)) * 5));
+  const dir = off < 0 ? -1 : 1;
+  scrollFill.style.top = off < 0 ? `calc(50% + ${off}px)` : '50%';
+  scrollFill.style.height = `${level ? Math.abs(off) : 0}px`;
+  scroller.classList.toggle('active', level > 0);
+  scrollThumb.setAttribute('aria-valuenow', String(level * dir));
+  if (level) {
+    speedBadge.textContent = `${dir < 0 ? '▲' : '▼'} Speed ${level}`;
+    speedBadge.hidden = false;
+    const t = scrollThumb.getBoundingClientRect();
+    speedBadge.style.top = `${t.top + t.height / 2 - speedBadge.offsetHeight / 2}px`;
+    speedBadge.style.left = `${scroller.getBoundingClientRect().left - speedBadge.offsetWidth - 10}px`;
+  } else {
+    speedBadge.hidden = true;
+  }
+  const changed = level !== scroll.level || dir !== scroll.dir;
+  scroll.level = level;
+  scroll.dir = dir;
+  if (changed) scrollLoop();
+}
+
+function releaseScroll() {
+  scroll.pointer = null;
+  scroller.classList.remove('dragging');
+  setScrollOffset(0); // spring back: thumb animates home, scrolling stops
+}
+
+scrollThumb.addEventListener('pointerdown', (e) => {
+  if (scroller.classList.contains('minimized')) return;
+  e.preventDefault();
+  scroll.pointer = e.pointerId;
+  scroll.startY = e.clientY;
+  scrollThumb.setPointerCapture(e.pointerId);
+  scroller.classList.add('dragging');
+});
+scrollThumb.addEventListener('pointermove', (e) => {
+  if (e.pointerId === scroll.pointer) setScrollOffset(e.clientY - scroll.startY);
+});
+for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) {
+  scrollThumb.addEventListener(ev, (e) => { if (e.pointerId === scroll.pointer) releaseScroll(); });
+}
+// Keyboard: arrow keys scroll a step
+scrollThumb.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+    e.preventDefault();
+    for (let i = 0; i < 3; i++) wheelStep(e.key === 'ArrowUp' ? -1 : 1);
+  }
+});
+// The arrow buttons scroll a small step
+for (const btn of scroller.querySelectorAll('[data-scroll-step]')) {
+  btn.addEventListener('click', () => {
+    for (let i = 0; i < 3; i++) wheelStep(Number(btn.dataset.scrollStep));
+  });
+}
+
+function setScrollerMinimized(min) {
+  scroller.classList.toggle('minimized', min);
+  const btn = $('#scroll-hide');
+  btn.setAttribute('aria-expanded', String(!min));
+  btn.title = min ? 'Show scroll control' : 'Hide scroll control';
+  btn.setAttribute('aria-label', btn.title);
+  if (min) releaseScroll();
+  store('scroller', min ? 'min' : 'open');
+}
+$('#scroll-hide').addEventListener('click', () => {
+  setScrollerMinimized(!scroller.classList.contains('minimized'));
+});
+setScrollerMinimized(store('scroller') === 'min');
+window.addEventListener('blur', () => { if (scroll.pointer !== null) releaseScroll(); });
+
 // ---------------------------------------------------------------- status
 const STATE_TEXT = {
   disconnected: ['Waiting for the phone', 'Plug the phone into the server and enable USB debugging (Settings › Developer options).'],

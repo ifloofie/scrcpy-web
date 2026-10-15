@@ -30,6 +30,10 @@
   <symbol id="i-camera" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M4 8h3l1.5-2h7L17 8h3v11H4z"/><circle cx="12" cy="13" r="3.2"/></g></symbol>
   <symbol id="i-expand" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
   <symbol id="i-bell" viewBox="0 0 24 24"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></g></symbol>
+  <symbol id="i-updown" viewBox="0 0 24 24"><path d="M8 9l4-4 4 4M8 15l4 4 4-4" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-chev-up" viewBox="0 0 24 24"><path d="M7 14l5-5 5 5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-chev-down" viewBox="0 0 24 24"><path d="M7 10l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-minimize" viewBox="0 0 24 24"><path d="M6 12h12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></symbol>
   <symbol id="i-more" viewBox="0 0 24 24"><g fill="currentColor"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></g></symbol>
 </svg>
 
@@ -53,6 +57,23 @@
 
   <main class="stage">
     <div id="screen" class="screen" aria-label="Phone screen"></div>
+    <div id="scroller" class="scroller" aria-label="Scroll control">
+      <button type="button" class="scroll-hide" id="scroll-hide" title="Hide scroll control" aria-label="Hide scroll control" aria-expanded="true">
+        <svg class="when-open"><use href="#i-minimize"/></svg>
+        <svg class="when-min"><use href="#i-updown"/></svg>
+      </button>
+      <div class="scroll-body">
+        <button type="button" class="scroll-step" data-scroll-step="-1" title="Scroll up a little" aria-label="Scroll up a little"><svg><use href="#i-chev-up"/></svg></button>
+        <div class="scroll-track" id="scroll-track">
+          <span class="tick t1"></span><span class="tick t2"></span><span class="tick t3"></span><span class="tick t4"></span>
+          <span class="scroll-fill" id="scroll-fill"></span>
+          <span class="scroll-thumb" id="scroll-thumb" role="slider" tabindex="0" aria-label="Scroll speed: drag up or down"
+                aria-valuemin="-5" aria-valuemax="5" aria-valuenow="0"><svg><use href="#i-updown"/></svg></span>
+          <span class="speed-badge" id="speed-badge" hidden></span>
+        </div>
+        <button type="button" class="scroll-step" data-scroll-step="1" title="Scroll down a little" aria-label="Scroll down a little"><svg><use href="#i-chev-down"/></svg></button>
+      </div>
+    </div>
     <div id="overlay" class="overlay" hidden>
       <div class="overlay-card">
         <div class="spinner" id="overlay-spinner"></div>

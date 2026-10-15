@@ -11,6 +11,7 @@ scrcpy-web runs [scrcpy](https://github.com/Genymobile/scrcpy) inside a Docker c
 - **Web UI on port 8080.** Works on phones, tablets and desktops, and can be added to an iPhone home screen as an app.
 - **Wake and unlock** from a button, with an optional stored PIN. The phone can also wake automatically when you open the page.
 - **Back, Home, Recents, Power, Volume** and notification shade buttons.
+- **Scroll slider** with 5 speeds, spring-back, and a minimize/lock button, so scrolling doesn't need fiddly drags.
 - **Typing and pasting text.** Paste handles any text, including emoji.
 - **Screenshots** in one tap.
 - **Rotation aware.** The view follows the phone between portrait and landscape with no black bars.
@@ -86,6 +87,7 @@ Your part:
 | 🔓 | Wake, swipe up and (optionally) enter your PIN |
 | ⏻ | Power button |
 | 🔉 🔊 | Volume |
+| ↕ slider (right edge) | **Scroll.** Hold the handle and drag up or down; the further you drag, the faster it scrolls (5 speeds). Let go and it springs back and stops. ⌃/⌄ scroll a small step. The **–** button minimizes it to a faint circle that can't scroll until you tap it again; the choice is remembered. |
 | ⌨ | Send text: **Paste** works with any text; **Type** uses ADB key events (ASCII only) |
 | 🔔 | Open the notification shade |
 | 📷 | Download a screenshot |

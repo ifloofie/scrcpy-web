@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.2.0 (2026-10-15)
+
+### Added
+- **Scroll slider** on the right edge of the phone screen. Hold and drag the handle up or down to scroll; the distance from the middle picks one of 5 speeds (about 3 to 30 scroll steps per second). It springs back and stops when released. The arrow buttons scroll a small step, and the arrow keys work when it has focus. Scrolling is sent as mouse-wheel input, which scrcpy turns into Android scroll events, so it works in almost every app.
+- The slider's **–** button minimizes it in place to a faint circle that is locked (can't scroll) until tapped again. The state is remembered per browser.
+
 ## 2.1.0 (2026-10-14)
 
 Security hardening: local network only by default.
